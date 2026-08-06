@@ -32,6 +32,65 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 # ==========================================
+# COUNTRY MASTER MAP (Code -> Flag, Name)
+# ==========================================
+COUNTRY_MAP = {
+    "IN": ("🇮🇳", "India"),
+    "197": ("🇮🇷", "Iran"),
+    "61": ("🇧🇫", "Burkina Faso"),
+    "901": ("🇲🇿", "Mozambique"),
+    "38": ("🇭🇹", "Haiti"),
+    "3": ("🇾🇪", "Yemen"),
+    "18": ("🇻🇪", "Venezuela"),
+    "336": ("🇿🇼", "Zimbabwe"),
+    "608": ("🇧🇮", "Burundi"),
+    "103": ("🇸🇸", "South Sudan"),
+    "2": ("🇪🇬", "Egypt"),
+    "117": ("🇹🇯", "Tajikistan"),
+    "232": ("🇸🇱", "Sierra Leone"),
+    "65": ("🇸🇬", "Singapore"),
+    "421": ("🇸🇰", "Slovakia"),
+    "386": ("🇸🇮", "Slovenia"),
+    "677": ("🇸🇧", "Solomon Islands"),
+    "252": ("🇸🇴", "Somalia"),
+    "27": ("🇿🇦", "South Africa"),
+    "82": ("🇰🇷", "South Korea"),
+    "34": ("🇪🇸", "Spain"),
+    "94": ("🇱🇰", "Sri Lanka"),
+    "249": ("🇸🇩", "Sudan"),
+    "597": ("🇸🇷", "Suriname"),
+    "268": ("🇸🇿", "Swaziland"),
+    "46": ("🇸🇪", "Sweden"),
+    "41": ("🇨🇭", "Switzerland"),
+    "963": ("🇸🇾", "Syria"),
+    "886": ("🇹🇼", "Taiwan"),
+    "255": ("🇹🇿", "Tanzania"),
+    "66": ("🇹🇭", "Thailand"),
+    "670": ("🇹🇱", "Timor-Leste"),
+    "228": ("🇹🇬", "Togo"),
+    "676": ("🇹🇴", "Tonga"),
+    "1868": ("🇹🇹", "Trinidad & Tobago"),
+    "216": ("🇹🇳", "Tunisia"),
+    "90": ("🇹🇷", "Turkey"),
+    "993": ("🇹🇲", "Turkmenistan"),
+    "1649": ("🇹🇨", "Turks & Caicos"),
+    "688": ("🇹🇻", "Tuvalu"),
+    "256": ("🇺🇬", "Uganda"),
+    "380": ("🇺🇦", "Ukraine"),
+    "971": ("🇦🇪", "UAE"),
+    "44": ("🇬🇧", "UK"),
+    "598": ("🇺🇾", "Uruguay"),
+    "998": ("🇺🇿", "Uzbekistan"),
+    "678": ("🇻🇺", "Vanuatu"),
+    "84": ("🇻🇳", "Vietnam"),
+    "1284": ("🇻🇬", "British Virgin Islands"),
+    "1340": ("🇻🇮", "US Virgin Islands"),
+    "260": ("🇿🇲", "Zambia"),
+    "700": ("🇰🇿", "Kazakhstan"),
+    "US": ("🇺🇸", "USA")
+}
+
+# ==========================================
 # FLASK & KEEP-ALIVE SYSTEM (For Render)
 # ==========================================
 @app.route('/')
@@ -57,7 +116,6 @@ def init_db():
     conn = sqlite3.connect("numbers.db")
     cursor = conn.cursor()
     
-    # Numbers tracking table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS active_numbers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,7 +128,6 @@ def init_db():
         )
     """)
     
-    # Premium Users table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS premium_users (
             user_id INTEGER PRIMARY KEY,
@@ -145,8 +202,46 @@ def is_premium_user(user_id):
     return row is not None
 
 # ==========================================
-# API HELPER FUNCTIONS
+# LIVE STATS & API HELPER FUNCTIONS
 # ==========================================
+def fetch_live_country_stats():
+    """Fetches real-time stock count per country from viewstats API."""
+    stats = {}
+    for url, token in [(API1_URL, API1_TOKEN), (API2_URL, API2_TOKEN)]:
+        try:
+            headers = {"Authorization": f"Bearer {token}"}
+            res = requests.get(url, headers=headers, timeout=8)
+            if res.status_code == 200:
+                data = res.json()
+                
+                # Handling dictionary format: {"197": 70, "61": 15}
+                if isinstance(data, dict):
+                    items = data.get("stats", data.get("data", data))
+                    if isinstance(items, dict):
+                        for k, v in items.items():
+                            if isinstance(v, (int, float)):
+                                stats[str(k)] = stats.get(str(k), 0) + int(v)
+                            elif isinstance(v, dict):
+                                cnt = v.get("count", v.get("stock", v.get("total", 0)))
+                                stats[str(k)] = stats.get(str(k), 0) + int(cnt)
+                    elif isinstance(items, list):
+                        for item in items:
+                            c_code = str(item.get("country", item.get("code", item.get("country_id", ""))))
+                            cnt = int(item.get("count", item.get("stock", item.get("total", 0))))
+                            if c_code:
+                                stats[c_code] = stats.get(c_code, 0) + cnt
+                # Handling list format: [{"country": "197", "count": 70}]
+                elif isinstance(data, list):
+                    for item in data:
+                        c_code = str(item.get("country", item.get("code", item.get("country_id", ""))))
+                        cnt = int(item.get("count", item.get("stock", item.get("total", 0))))
+                        if c_code:
+                            stats[c_code] = stats.get(c_code, 0) + cnt
+        except Exception as e:
+            logging.error(f"Error fetching stats from {url}: {e}")
+
+    return stats
+
 def fetch_number_from_api(country_code="US"):
     headers1 = {"Authorization": f"Bearer {API1_TOKEN}"}
     headers2 = {"Authorization": f"Bearer {API2_TOKEN}"}
@@ -212,23 +307,30 @@ def main_menu_keyboard():
 
 def country_selection_keyboard():
     markup = types.InlineKeyboardMarkup(row_width=2)
-    countries = [
-        ("🇮🇳 India ⭐ [PREMIUM]", "getnum_IN"),
-        ("🇮🇷 Iran", "getnum_IR"),
-        ("🇧🇫 Burkina Faso", "getnum_BF"),
-        ("🇲🇿 Mozambique", "getnum_MZ"),
-        ("🇭🇹 Haiti", "getnum_HT"),
-        ("🇾🇪 Yemen", "getnum_YE"),
-        ("🇻🇪 Venezuela", "getnum_VE"),
-        ("🇿🇼 Zimbabwe", "getnum_ZW"),
-        ("🇧🇮 Burundi", "getnum_BI"),
-        ("🇸🇸 South Sudan", "getnum_SS"),
-        ("🇪🇬 Egypt", "getnum_EG"),
-        ("🇹🇯 Tajikistan", "getnum_TJ"),
-        ("🇺🇸 USA", "getnum_US"),
-        ("🌐 Any Country", "getnum_ANY")
-    ]
-    buttons = [types.InlineKeyboardButton(text, callback_data=code) for text, code in countries]
+    buttons = []
+    
+    # Fetch live counts from API
+    stats = fetch_live_country_stats()
+    
+    # Fallback default list if API stats empty
+    if not stats:
+        stats = {"IN": 50, "197": 70, "61": 15, "901": 90, "38": 38, "3": 3, "18": 18, "336": 336, "608": 608, "103": 103, "2": 2, "117": 117, "US": 100}
+
+    for code, count in stats.items():
+        if count <= 0:
+            continue
+            
+        flag, name = COUNTRY_MAP.get(code, ("🌐", f"Country {code}"))
+        
+        # Special Label for India Premium
+        if code == "IN":
+            btn_label = f"{flag} {name} ⭐ [{count}]"
+        else:
+            btn_label = f"{flag} {name} [{count}]"
+            
+        buttons.append(types.InlineKeyboardButton(btn_label, callback_data=f"getnum_{code}"))
+
+    # Adding buttons to markup
     markup.add(*buttons)
     markup.add(types.InlineKeyboardButton("🔙 Back to Main Menu", callback_data="main_menu"))
     return markup
@@ -247,7 +349,6 @@ def send_welcome(message):
 
 @bot.message_handler(commands=['premium'])
 def add_premium_command(message):
-    """Owner command to add premium users: /premium <user_id>"""
     if message.from_user.id != OWNER_ID:
         bot.reply_to(message, "❌ <i>Yeh command sirf Bot Owner ke liye hai.</i>")
         return
@@ -262,7 +363,6 @@ def add_premium_command(message):
         add_premium_user(target_user_id)
         bot.reply_to(message, f"✅ <b>User ID <code>{target_user_id}</code> is now a PREMIUM User!</b>")
         
-        # Notify the user
         try:
             bot.send_message(target_user_id, "🎉 <b>Congratulations! Aapko Premium Access de diya gaya hai. Ab aap India (🇮🇳) ke numbers use kar sakte hain.</b>")
         except Exception:
@@ -312,8 +412,9 @@ def callback_listener(call):
             )
 
         elif call.data == "panel_get_number":
+            bot.answer_callback_query(call.id, "Loading Live Country Stock...")
             bot.edit_message_text(
-                "🌍 <b>Select Country for Virtual Number:</b>\n\nChoose the country where you want to receive the number:",
+                "🌍 <b>Select Country for Virtual Number:</b>\n\nChoose the country where numbers are available:",
                 chat_id=chat_id,
                 message_id=call.message.message_id,
                 reply_markup=country_selection_keyboard()
@@ -348,7 +449,7 @@ def callback_listener(call):
                 text = (
                     f"✅ <b>Number Generated Successfully!</b>\n\n"
                     f"📱 <b>Number:</b> <code>{number}</code>\n"
-                    f"🏳️ <b>Country:</b> {country_code}\n\n"
+                    f"🏳️ <b>Country Code:</b> {country_code}\n\n"
                     f"<i>Yeh number aapke naam save ho gaya hai. OTP isi chat me aayega.</i>"
                 )
                 bot.send_message(chat_id, text, reply_markup=markup)
@@ -435,5 +536,5 @@ if __name__ == "__main__":
     ping_thread.daemon = True
     ping_thread.start()
 
-    print("Bot is running with 15s keep-alive system...")
-    bot.infinity_polling(skip_pending=True)
+    print("Bot is running with live country stock stats...")
+    bot.infinity_polling(skip_pending=True) 
