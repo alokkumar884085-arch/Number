@@ -15,12 +15,18 @@ from flask import Flask
 BOT_TOKEN = "8856008829:AAHgne9V0zbxiSb67FUKNKIQM1x89_Lk1QY"
 OWNER_ID = 8785590284
 
-API1_URL = "http://147.135.212.197/crapi/st/viewstats"
-API1_TOKEN = "SE5XREZBUzRfTpVnX2dQh3NQcYB2dZBWQ4JpXVxmblp2alCDi25oZg=="
+# Stats & Stock View API
+API_STATS_URL1 = "http://147.135.212.197/crapi/st/viewstats"
+API_STATS_URL2 = "http://147.135.212.197/crapi/st/viewstats"
 
-API2_URL = "http://147.135.212.197/crapi/st/viewstats"
+# Get Number APIs (Endpoints for generating numbers)
+API_GETNUM_URL1 = "http://147.135.212.197/crapi/st/getnumber"
+API_GETNUM_URL2 = "http://147.135.212.197/crapi/st/getnumber"
+
+API1_TOKEN = "SE5XREZBUzRfTpVnX2dQh3NQcYB2dZBWQ4JpXVxmblp2alCDi25oZg=="
 API2_TOKEN = "RVdWRElBUzRGcW9WeneNcmd2cGV9ZJd8e29PVlyPcFxeamxSgWVXfw=="
 
+# OTP Report API
 API3_URL = "https://pscall.net/restapi/smsreport"
 API3_KEY = "SFNYSj1SS16DgYdyf4KIgA=="
 
@@ -207,14 +213,14 @@ def is_premium_user(user_id):
 def fetch_live_country_stats():
     """Fetches real-time stock count per country from viewstats API."""
     stats = {}
-    for url, token in [(API1_URL, API1_TOKEN), (API2_URL, API2_TOKEN)]:
+    for url, token in [(API_STATS_URL1, API1_TOKEN), (API_STATS_URL2, API2_TOKEN)]:
         try:
             headers = {"Authorization": f"Bearer {token}"}
             res = requests.get(url, headers=headers, timeout=8)
             if res.status_code == 200:
                 data = res.json()
                 
-                # Handling dictionary format: {"197": 70, "61": 15}
+                # Dictionary parsing
                 if isinstance(data, dict):
                     items = data.get("stats", data.get("data", data))
                     if isinstance(items, dict):
@@ -230,7 +236,7 @@ def fetch_live_country_stats():
                             cnt = int(item.get("count", item.get("stock", item.get("total", 0))))
                             if c_code:
                                 stats[c_code] = stats.get(c_code, 0) + cnt
-                # Handling list format: [{"country": "197", "count": 70}]
+                # List parsing
                 elif isinstance(data, list):
                     for item in data:
                         c_code = str(item.get("country", item.get("code", item.get("country_id", ""))))
@@ -243,19 +249,39 @@ def fetch_live_country_stats():
     return stats
 
 def fetch_number_from_api(country_code="US"):
+    """Tries multiple endpoints and response keys to extract phone number."""
     headers1 = {"Authorization": f"Bearer {API1_TOKEN}"}
     headers2 = {"Authorization": f"Bearer {API2_TOKEN}"}
     params = {"country": country_code}
 
-    for url, headers in [(API1_URL, headers1), (API2_URL, headers2)]:
+    # Potential endpoints to fetch numbers
+    endpoints = [
+        (API_GETNUM_URL1, headers1),
+        (API_GETNUM_URL2, headers2),
+        (API_STATS_URL1, headers1),
+        (API_STATS_URL2, headers2)
+    ]
+
+    for url, headers in endpoints:
         try:
             res = requests.get(url, headers=headers, params=params, timeout=10)
+            logging.info(f"Get Number API Raw Response ({url}): {res.text}")
+            
             if res.status_code == 200:
                 data = res.json()
-                if isinstance(data, dict) and "number" in data:
-                    return str(data["number"])
-                elif isinstance(data, list) and len(data) > 0 and "number" in data[0]:
-                    return str(data[0]["number"])
+                
+                if isinstance(data, dict):
+                    num = data.get("number") or data.get("phone") or data.get("phone_number") or data.get("msisdn")
+                    if num:
+                        return str(num)
+                elif isinstance(data, list) and len(data) > 0:
+                    item = data[0]
+                    if isinstance(item, dict):
+                        num = item.get("number") or item.get("phone") or item.get("phone_number")
+                        if num:
+                            return str(num)
+                    elif isinstance(item, (str, int)):
+                        return str(item)
         except Exception as e:
             logging.error(f"API Fetch Error ({url}): {e}")
 
@@ -276,7 +302,7 @@ def fetch_otp_from_api(phone_number):
     except Exception as e:
         logging.error(f"API3 Error: {e}")
 
-    for url, token in [(API1_URL, API1_TOKEN), (API2_URL, API2_TOKEN)]:
+    for url, token in [(API_STATS_URL1, API1_TOKEN), (API_STATS_URL2, API2_TOKEN)]:
         try:
             headers = {"Authorization": f"Bearer {token}"}
             params = {"number": phone_number}
@@ -309,20 +335,17 @@ def country_selection_keyboard():
     markup = types.InlineKeyboardMarkup(row_width=2)
     buttons = []
     
-    # Fetch live counts from API
+    # Live stock count from API
     stats = fetch_live_country_stats()
     
-    # Fallback default list if API stats empty
-    if not stats:
-        stats = {"IN": 50, "197": 70, "61": 15, "901": 90, "38": 38, "3": 3, "18": 18, "336": 336, "608": 608, "103": 103, "2": 2, "117": 117, "US": 100}
-
+    # Sirf wahi countries add karo jinme Stock > 0 hai
     for code, count in stats.items():
-        if count <= 0:
-            continue
+        if int(count) <= 0:
+            continue  # Ignore zero stock countries
             
         flag, name = COUNTRY_MAP.get(code, ("🌐", f"Country {code}"))
         
-        # Special Label for India Premium
+        # Label with Stock count e.g. Iran [70]
         if code == "IN":
             btn_label = f"{flag} {name} ⭐ [{count}]"
         else:
@@ -330,7 +353,10 @@ def country_selection_keyboard():
             
         buttons.append(types.InlineKeyboardButton(btn_label, callback_data=f"getnum_{code}"))
 
-    # Adding buttons to markup
+    # Agar live stock na mile, toh user ko batayein
+    if not buttons:
+        buttons.append(types.InlineKeyboardButton("❌ Currently Stock is Empty", callback_data="panel_get_number"))
+
     markup.add(*buttons)
     markup.add(types.InlineKeyboardButton("🔙 Back to Main Menu", callback_data="main_menu"))
     return markup
@@ -412,9 +438,9 @@ def callback_listener(call):
             )
 
         elif call.data == "panel_get_number":
-            bot.answer_callback_query(call.id, "Loading Live Country Stock...")
+            bot.answer_callback_query(call.id, "Loading Available Countries Stock...")
             bot.edit_message_text(
-                "🌍 <b>Select Country for Virtual Number:</b>\n\nChoose the country where numbers are available:",
+                "🌍 <b>Select Country for Virtual Number:</b>\n\nNeeche sirf wahi countries hain jinme <b>live stock available</b> hai:",
                 chat_id=chat_id,
                 message_id=call.message.message_id,
                 reply_markup=country_selection_keyboard()
@@ -513,7 +539,7 @@ def callback_listener(call):
             help_text = (
                 "<b>ℹ️ How to use this Bot:</b>\n\n"
                 "1. Click on <b>Get Number Panel</b>.\n"
-                "2. Choose your preferred country.\n"
+                "2. Choose your preferred country with available stock.\n"
                 "3. Copy the generated number and paste it in your app.\n"
                 "4. Click <b>Check OTP</b>. OTP direct aapke DM me bhej diya jayega."
             )
@@ -536,5 +562,5 @@ if __name__ == "__main__":
     ping_thread.daemon = True
     ping_thread.start()
 
-    print("Bot is running with live country stock stats...")
-    bot.infinity_polling(skip_pending=True) 
+    print("Bot is running with strictly available stock filtering...")
+    bot.infinity_polling(skip_pending=True)
