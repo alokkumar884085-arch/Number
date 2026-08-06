@@ -56,6 +56,8 @@ def keep_alive_ping():
 def init_db():
     conn = sqlite3.connect("numbers.db")
     cursor = conn.cursor()
+    
+    # Numbers tracking table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS active_numbers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,6 +69,15 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    
+    # Premium Users table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS premium_users (
+            user_id INTEGER PRIMARY KEY,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    
     conn.commit()
     conn.close()
 
@@ -116,6 +127,23 @@ def get_number_owner_and_status(number):
     conn.close()
     return row
 
+def add_premium_user(user_id):
+    conn = sqlite3.connect("numbers.db")
+    cursor = conn.cursor()
+    cursor.execute("INSERT OR REPLACE INTO premium_users (user_id) VALUES (?)", (user_id,))
+    conn.commit()
+    conn.close()
+
+def is_premium_user(user_id):
+    if user_id == OWNER_ID:
+        return True
+    conn = sqlite3.connect("numbers.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id FROM premium_users WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row is not None
+
 # ==========================================
 # API HELPER FUNCTIONS
 # ==========================================
@@ -139,7 +167,6 @@ def fetch_number_from_api(country_code="US"):
     return None
 
 def fetch_otp_from_api(phone_number):
-    # API 3
     try:
         headers = {"x-api-key": API3_KEY}
         params = {"number": phone_number}
@@ -154,7 +181,6 @@ def fetch_otp_from_api(phone_number):
     except Exception as e:
         logging.error(f"API3 Error: {e}")
 
-    # Fallback API 1 & 2
     for url, token in [(API1_URL, API1_TOKEN), (API2_URL, API2_TOKEN)]:
         try:
             headers = {"Authorization": f"Bearer {token}"}
@@ -187,11 +213,19 @@ def main_menu_keyboard():
 def country_selection_keyboard():
     markup = types.InlineKeyboardMarkup(row_width=2)
     countries = [
-        ("🇮🇳 India", "getnum_IN"),
+        ("🇮🇳 India ⭐ [PREMIUM]", "getnum_IN"),
+        ("🇮🇷 Iran", "getnum_IR"),
+        ("🇧🇫 Burkina Faso", "getnum_BF"),
+        ("🇲🇿 Mozambique", "getnum_MZ"),
+        ("🇭🇹 Haiti", "getnum_HT"),
+        ("🇾🇪 Yemen", "getnum_YE"),
+        ("🇻🇪 Venezuela", "getnum_VE"),
+        ("🇿🇼 Zimbabwe", "getnum_ZW"),
+        ("🇧🇮 Burundi", "getnum_BI"),
+        ("🇸🇸 South Sudan", "getnum_SS"),
+        ("🇪🇬 Egypt", "getnum_EG"),
+        ("🇹🇯 Tajikistan", "getnum_TJ"),
         ("🇺🇸 USA", "getnum_US"),
-        ("🇬🇧 UK", "getnum_GB"),
-        ("🇷🇺 Russia", "getnum_RU"),
-        ("🇨🇦 Canada", "getnum_CA"),
         ("🌐 Any Country", "getnum_ANY")
     ]
     buttons = [types.InlineKeyboardButton(text, callback_data=code) for text, code in countries]
@@ -205,11 +239,39 @@ def country_selection_keyboard():
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     welcome_text = (
-        f"<b>Welcome to Virtual OTP Service!</b> 👋\n\n"
+        f"👋 <b>Welcome back {message.from_user.first_name}!</b>\n\n"
         f"Aap yahan se virtual numbers aur unke OTP aasani se prapt kar sakte hain.\n"
         f"Neeche diye gaye panel se <b>Get Number Panel</b> par click karein."
     )
     bot.send_message(message.chat.id, welcome_text, reply_markup=main_menu_keyboard())
+
+@bot.message_handler(commands=['premium'])
+def add_premium_command(message):
+    """Owner command to add premium users: /premium <user_id>"""
+    if message.from_user.id != OWNER_ID:
+        bot.reply_to(message, "❌ <i>Yeh command sirf Bot Owner ke liye hai.</i>")
+        return
+
+    try:
+        args = message.text.split()
+        if len(args) < 2:
+            bot.reply_to(message, "⚠️ <b>Usage:</b> <code>/premium <USER_ID></code>")
+            return
+
+        target_user_id = int(args[1])
+        add_premium_user(target_user_id)
+        bot.reply_to(message, f"✅ <b>User ID <code>{target_user_id}</code> is now a PREMIUM User!</b>")
+        
+        # Notify the user
+        try:
+            bot.send_message(target_user_id, "🎉 <b>Congratulations! Aapko Premium Access de diya gaya hai. Ab aap India (🇮🇳) ke numbers use kar sakte hain.</b>")
+        except Exception:
+            pass
+
+    except ValueError:
+        bot.reply_to(message, "❌ Invalid User ID. Numerical ID likhein.")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Error: {e}")
 
 @bot.message_handler(commands=['number'])
 def owner_unused_numbers(message):
@@ -259,8 +321,21 @@ def callback_listener(call):
 
         elif call.data.startswith("getnum_"):
             country_code = call.data.split("_")[1]
-            bot.answer_callback_query(call.id, "Fetching number from server...")
             
+            # Premium Check for India
+            if country_code == "IN" and not is_premium_user(user_id):
+                premium_msg = (
+                    "⭐ <b>India (🇮🇳) numbers are for PREMIUM users only!</b>\n\n"
+                    "Premium lene ke liye contact kare:\n"
+                    "👉 @FREE_FIRE_INDIA_GROUP"
+                )
+                markup = types.InlineKeyboardMarkup()
+                markup.add(types.InlineKeyboardButton("💬 Contact for Premium", url="https://t.me/FREE_FIRE_INDIA_GROUP"))
+                markup.add(types.InlineKeyboardButton("🔙 Select Other Country", callback_data="panel_get_number"))
+                bot.send_message(chat_id, premium_msg, reply_markup=markup)
+                return
+
+            bot.answer_callback_query(call.id, "Fetching number from server...")
             number = fetch_number_from_api(country_code)
             
             if number:
@@ -274,7 +349,7 @@ def callback_listener(call):
                     f"✅ <b>Number Generated Successfully!</b>\n\n"
                     f"📱 <b>Number:</b> <code>{number}</code>\n"
                     f"🏳️ <b>Country:</b> {country_code}\n\n"
-                    f"<i>Yeh number aapke naam save ho gaya hai. Jab OTP aayega, isi chat me deliver hoga.</i>"
+                    f"<i>Yeh number aapke naam save ho gaya hai. OTP isi chat me aayega.</i>"
                 )
                 bot.send_message(chat_id, text, reply_markup=markup)
             else:
@@ -286,12 +361,10 @@ def callback_listener(call):
             number = call.data.split("_")[1]
             bot.answer_callback_query(call.id, "Checking OTP...")
 
-            # Verify that this number belongs to the requesting user or handle accordingly
             record = get_number_owner_and_status(number)
             if record:
                 owner_id_db, otp_received_db = record
                 
-                # Agar pehle hi OTP mil chuka ho aur dobara check kare
                 if otp_received_db == 1:
                     bot.send_message(chat_id, f"⚠️ <i>Is number ke liye OTP pehle hi deliver kiya ja chuka hai.</i>")
                     return
@@ -309,7 +382,6 @@ def callback_listener(call):
                         f"🔑 <b>Code:</b> {code_text}\n\n"
                         f"📩 <b>Full Message:</b>\n<code>{otp_msg}</code>"
                     )
-                    # Explicitly sending to the user's chat_id (DM)
                     bot.send_message(owner_id_db, response)
                 else:
                     markup = types.InlineKeyboardMarkup()
