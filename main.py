@@ -15,18 +15,16 @@ from flask import Flask
 BOT_TOKEN = "8856008829:AAHgne9V0zbxiSb67FUKNKIQM1x89_Lk1QY"
 OWNER_ID = 8785590284
 
-# Stats & Stock View API
+# API Endpoints
 API_STATS_URL1 = "http://147.135.212.197/crapi/st/viewstats"
 API_STATS_URL2 = "http://147.135.212.197/crapi/st/viewstats"
 
-# Get Number APIs (Endpoints for generating numbers)
 API_GETNUM_URL1 = "http://147.135.212.197/crapi/st/getnumber"
 API_GETNUM_URL2 = "http://147.135.212.197/crapi/st/getnumber"
 
 API1_TOKEN = "SE5XREZBUzRfTpVnX2dQh3NQcYB2dZBWQ4JpXVxmblp2alCDi25oZg=="
 API2_TOKEN = "RVdWRElBUzRGcW9WeneNcmd2cGV9ZJd8e29PVlyPcFxeamxSgWVXfw=="
 
-# OTP Report API
 API3_URL = "https://pscall.net/restapi/smsreport"
 API3_KEY = "SFNYSj1SS16DgYdyf4KIgA=="
 
@@ -38,7 +36,7 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 # ==========================================
-# COUNTRY MASTER MAP (Code -> Flag, Name)
+# COUNTRY MASTER MAP
 # ==========================================
 COUNTRY_MAP = {
     "IN": ("🇮🇳", "India"),
@@ -97,7 +95,7 @@ COUNTRY_MAP = {
 }
 
 # ==========================================
-# FLASK & KEEP-ALIVE SYSTEM (For Render)
+# FLASK & KEEP-ALIVE SYSTEM
 # ==========================================
 @app.route('/')
 def home():
@@ -116,7 +114,7 @@ def keep_alive_ping():
             logging.error(f"Keep-alive ping error: {e}")
 
 # ==========================================
-# DATABASE SETUP (SQLite)
+# DATABASE SETUP
 # ==========================================
 def init_db():
     conn = sqlite3.connect("numbers.db")
@@ -211,7 +209,6 @@ def is_premium_user(user_id):
 # LIVE STATS & API HELPER FUNCTIONS
 # ==========================================
 def fetch_live_country_stats():
-    """Fetches real-time stock count per country from viewstats API."""
     stats = {}
     for url, token in [(API_STATS_URL1, API1_TOKEN), (API_STATS_URL2, API2_TOKEN)]:
         try:
@@ -219,8 +216,6 @@ def fetch_live_country_stats():
             res = requests.get(url, headers=headers, timeout=8)
             if res.status_code == 200:
                 data = res.json()
-                
-                # Dictionary parsing
                 if isinstance(data, dict):
                     items = data.get("stats", data.get("data", data))
                     if isinstance(items, dict):
@@ -236,7 +231,6 @@ def fetch_live_country_stats():
                             cnt = int(item.get("count", item.get("stock", item.get("total", 0))))
                             if c_code:
                                 stats[c_code] = stats.get(c_code, 0) + cnt
-                # List parsing
                 elif isinstance(data, list):
                     for item in data:
                         c_code = str(item.get("country", item.get("code", item.get("country_id", ""))))
@@ -249,12 +243,16 @@ def fetch_live_country_stats():
     return stats
 
 def fetch_number_from_api(country_code="US"):
-    """Tries multiple endpoints and response keys to extract phone number."""
     headers1 = {"Authorization": f"Bearer {API1_TOKEN}"}
     headers2 = {"Authorization": f"Bearer {API2_TOKEN}"}
-    params = {"country": country_code}
 
-    # Potential endpoints to fetch numbers
+    param_variations = [
+        {"country": country_code},
+        {"country": country_code, "action": "getNumber"},
+        {"country": country_code, "service": "tg"},
+        {"country_id": country_code}
+    ]
+
     endpoints = [
         (API_GETNUM_URL1, headers1),
         (API_GETNUM_URL2, headers2),
@@ -263,27 +261,37 @@ def fetch_number_from_api(country_code="US"):
     ]
 
     for url, headers in endpoints:
-        try:
-            res = requests.get(url, headers=headers, params=params, timeout=10)
-            logging.info(f"Get Number API Raw Response ({url}): {res.text}")
-            
-            if res.status_code == 200:
-                data = res.json()
-                
-                if isinstance(data, dict):
-                    num = data.get("number") or data.get("phone") or data.get("phone_number") or data.get("msisdn")
-                    if num:
-                        return str(num)
-                elif isinstance(data, list) and len(data) > 0:
-                    item = data[0]
-                    if isinstance(item, dict):
-                        num = item.get("number") or item.get("phone") or item.get("phone_number")
-                        if num:
-                            return str(num)
-                    elif isinstance(item, (str, int)):
-                        return str(item)
-        except Exception as e:
-            logging.error(f"API Fetch Error ({url}): {e}")
+        for params in param_variations:
+            try:
+                res = requests.get(url, headers=headers, params=params, timeout=8)
+                logging.info(f"API Request ({url}) Params: {params} -> Response: {res.text}")
+
+                if res.status_code == 200 and res.text:
+                    try:
+                        data = res.json()
+                        if isinstance(data, dict):
+                            num = data.get("number") or data.get("phone") or data.get("phone_number") or data.get("msisdn")
+                            if not num and "data" in data and isinstance(data["data"], dict):
+                                num = data["data"].get("number") or data["data"].get("phone")
+                            if num:
+                                return str(num)
+                        elif isinstance(data, list) and len(data) > 0:
+                            item = data[0]
+                            if isinstance(item, dict):
+                                num = item.get("number") or item.get("phone") or item.get("phone_number")
+                                if num:
+                                    return str(num)
+                            elif isinstance(item, (str, int)):
+                                return str(item)
+                    except Exception:
+                        pass
+
+                    # Direct Regex Fallback: Finds any 8 to 15 digit number from API response
+                    phone_matches = re.findall(r'\b\d{8,15}\b', res.text)
+                    if phone_matches:
+                        return phone_matches[0]
+            except Exception as e:
+                logging.error(f"API Fetch Error ({url}): {e}")
 
     return None
 
@@ -291,33 +299,90 @@ def fetch_otp_from_api(phone_number):
     try:
         headers = {"x-api-key": API3_KEY}
         params = {"number": phone_number}
-        res = requests.get(API3_URL, headers=headers, params=params, timeout=10)
-        if res.status_code == 200:
-            data = res.json()
-            sms_list = data.get("reports", []) or data.get("sms", []) or (data if isinstance(data, list) else [])
-            for sms in sms_list:
-                msg = sms.get("message") or sms.get("sms_text") or str(sms)
-                if msg:
-                    return msg
+        res = requests.get(API3_URL, headers=headers, params=params, timeout=8)
+        if res.status_code == 200 and res.text:
+            try:
+                data = res.json()
+                sms_list = data.get("reports", []) or data.get("sms", []) or (data if isinstance(data, list) else [])
+                for sms in sms_list:
+                    if isinstance(sms, dict):
+                        msg = sms.get("message") or sms.get("sms_text") or sms.get("text")
+                        if msg:
+                            return str(msg)
+                    elif isinstance(sms, str):
+                        return sms
+            except Exception:
+                if len(res.text) > 3 and "STATUS" not in res.text:
+                    return res.text
     except Exception as e:
-        logging.error(f"API3 Error: {e}")
+        logging.error(f"API3 OTP Error: {e}")
 
     for url, token in [(API_STATS_URL1, API1_TOKEN), (API_STATS_URL2, API2_TOKEN)]:
         try:
             headers = {"Authorization": f"Bearer {token}"}
-            params = {"number": phone_number}
-            res = requests.get(url, headers=headers, params=params, timeout=10)
-            if res.status_code == 200:
-                data = res.json()
-                sms_list = data.get("messages", []) or (data if isinstance(data, list) else [])
-                for sms in sms_list:
-                    msg = sms.get("message") or sms.get("text") or str(sms)
-                    if msg:
-                        return msg
+            params = {"number": phone_number, "action": "getSms"}
+            res = requests.get(url, headers=headers, params=params, timeout=8)
+            if res.status_code == 200 and res.text:
+                try:
+                    data = res.json()
+                    sms_list = data.get("messages", []) or data.get("data", []) or (data if isinstance(data, list) else [])
+                    for sms in sms_list:
+                        if isinstance(sms, dict):
+                            msg = sms.get("message") or sms.get("text") or sms.get("sms")
+                            if msg:
+                                return str(msg)
+                        elif isinstance(sms, str):
+                            return sms
+                except Exception:
+                    if "STATUS_OK" in res.text or ":" in res.text:
+                        parts = res.text.split(":")
+                        if len(parts) >= 2:
+                            return parts[1]
         except Exception as e:
-            logging.error(f"API OTP Error: {e}")
+            logging.error(f"API OTP Error ({url}): {e}")
 
     return None
+
+# ==========================================
+# AUTOMATIC BACKGROUND OTP POLLING THREAD
+# ==========================================
+def auto_otp_checker_thread():
+    """Continuously checks for OTP every 10s and sends it directly to user's DM."""
+    while True:
+        time.sleep(10)
+        try:
+            conn = sqlite3.connect("numbers.db")
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT user_id, number 
+                FROM active_numbers 
+                WHERE otp_received = 0 
+                AND created_at >= datetime('now', '-20 minutes')
+            """)
+            pending_records = cursor.fetchall()
+            conn.close()
+
+            for user_id, number in pending_records:
+                otp_msg = fetch_otp_from_api(number)
+                if otp_msg:
+                    mark_otp_received(number, otp_msg)
+                    
+                    digits = re.findall(r'\b\d{4,8}\b', otp_msg)
+                    code_text = f"<code>{digits[0]}</code>" if digits else "N/A"
+
+                    response = (
+                        f"🎉 <b>AUTO OTP RECEIVED!</b>\n\n"
+                        f"📱 <b>Number:</b> <code>{number}</code>\n"
+                        f"🔑 <b>OTP Code:</b> {code_text}\n\n"
+                        f"📩 <b>Full Message:</b>\n<code>{otp_msg}</code>"
+                    )
+                    try:
+                        bot.send_message(user_id, response)
+                        logging.info(f"Auto OTP delivered for number {number} to user {user_id}")
+                    except Exception as send_err:
+                        logging.error(f"Failed to send auto OTP message: {send_err}")
+        except Exception as e:
+            logging.error(f"Error in auto OTP background thread: {e}")
 
 # ==========================================
 # KEYBOARD MARKUPS
@@ -335,27 +400,12 @@ def country_selection_keyboard():
     markup = types.InlineKeyboardMarkup(row_width=2)
     buttons = []
     
-    # Live stock count from API
     stats = fetch_live_country_stats()
-    
-    # Sirf wahi countries add karo jinme Stock > 0 hai
-    for code, count in stats.items():
-        if int(count) <= 0:
-            continue  # Ignore zero stock countries
-            
-        flag, name = COUNTRY_MAP.get(code, ("🌐", f"Country {code}"))
-        
-        # Label with Stock count e.g. Iran [70]
-        if code == "IN":
-            btn_label = f"{flag} {name} ⭐ [{count}]"
-        else:
-            btn_label = f"{flag} {name} [{count}]"
-            
-        buttons.append(types.InlineKeyboardButton(btn_label, callback_data=f"getnum_{code}"))
 
-    # Agar live stock na mile, toh user ko batayein
-    if not buttons:
-        buttons.append(types.InlineKeyboardButton("❌ Currently Stock is Empty", callback_data="panel_get_number"))
+    for code, (flag, name) in COUNTRY_MAP.items():
+        count = stats.get(code, 0)
+        btn_label = f"{flag} {name} [{count}]" if count > 0 else f"{flag} {name}"
+        buttons.append(types.InlineKeyboardButton(btn_label, callback_data=f"getnum_{code}"))
 
     markup.add(*buttons)
     markup.add(types.InlineKeyboardButton("🔙 Back to Main Menu", callback_data="main_menu"))
@@ -438,9 +488,9 @@ def callback_listener(call):
             )
 
         elif call.data == "panel_get_number":
-            bot.answer_callback_query(call.id, "Loading Available Countries Stock...")
+            bot.answer_callback_query(call.id, "Loading Countries...")
             bot.edit_message_text(
-                "🌍 <b>Select Country for Virtual Number:</b>\n\nNeeche sirf wahi countries hain jinme <b>live stock available</b> hai:",
+                "🌍 <b>Select Country for Virtual Number:</b>\n\nJis bhi country par aap click karenge uska number turant show hoga:",
                 chat_id=chat_id,
                 message_id=call.message.message_id,
                 reply_markup=country_selection_keyboard()
@@ -449,7 +499,6 @@ def callback_listener(call):
         elif call.data.startswith("getnum_"):
             country_code = call.data.split("_")[1]
             
-            # Premium Check for India
             if country_code == "IN" and not is_premium_user(user_id):
                 premium_msg = (
                     "⭐ <b>India (🇮🇳) numbers are for PREMIUM users only!</b>\n\n"
@@ -462,7 +511,7 @@ def callback_listener(call):
                 bot.send_message(chat_id, premium_msg, reply_markup=markup)
                 return
 
-            bot.answer_callback_query(call.id, "Fetching number from server...")
+            bot.answer_callback_query(call.id, "Fetching number instantly...")
             number = fetch_number_from_api(country_code)
             
             if number:
@@ -476,13 +525,13 @@ def callback_listener(call):
                     f"✅ <b>Number Generated Successfully!</b>\n\n"
                     f"📱 <b>Number:</b> <code>{number}</code>\n"
                     f"🏳️ <b>Country Code:</b> {country_code}\n\n"
-                    f"<i>Yeh number aapke naam save ho gaya hai. OTP isi chat me aayega.</i>"
+                    f"⚡ <i>Aapko button dabane ki zaroorat nahi hai, OTP aate hi Bot aapko automatic message kar dega!</i>"
                 )
                 bot.send_message(chat_id, text, reply_markup=markup)
             else:
                 markup = types.InlineKeyboardMarkup()
                 markup.add(types.InlineKeyboardButton("🔄 Try Again", callback_data="panel_get_number"))
-                bot.send_message(chat_id, "❌ <i>No numbers currently available for this country. Please try another country.</i>", reply_markup=markup)
+                bot.send_message(chat_id, "❌ <i>Server par number generate nahi ho pa raha hai. Kripya dusri country try karein.</i>", reply_markup=markup)
 
         elif call.data.startswith("chk_"):
             number = call.data.split("_")[1]
@@ -526,7 +575,7 @@ def callback_listener(call):
                 markup.add(types.InlineKeyboardButton("📩 Check OTP", callback_data=f"chk_{number}"))
                 markup.add(types.InlineKeyboardButton("🔙 Main Menu", callback_data="main_menu"))
                 
-                status_text = "✅ OTP Received" if otp_status == 1 else "⏳ Waiting for OTP"
+                status_text = "✅ OTP Received" if otp_status == 1 else "⏳ Waiting for OTP (Auto-checking active)"
                 bot.send_message(
                     chat_id,
                     f"📱 Your last active number: <code>{number}</code> ({country})\nStatus: {status_text}",
@@ -539,9 +588,9 @@ def callback_listener(call):
             help_text = (
                 "<b>ℹ️ How to use this Bot:</b>\n\n"
                 "1. Click on <b>Get Number Panel</b>.\n"
-                "2. Choose your preferred country with available stock.\n"
+                "2. Choose your preferred country.\n"
                 "3. Copy the generated number and paste it in your app.\n"
-                "4. Click <b>Check OTP</b>. OTP direct aapke DM me bhej diya jayega."
+                "4. <b>OTP aate hi bot automatic aapko send kar dega!</b>"
             )
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🔙 Back", callback_data="main_menu"))
@@ -562,5 +611,9 @@ if __name__ == "__main__":
     ping_thread.daemon = True
     ping_thread.start()
 
-    print("Bot is running with strictly available stock filtering...")
+    otp_thread = threading.Thread(target=auto_otp_checker_thread)
+    otp_thread.daemon = True
+    otp_thread.start()
+
+    print("Bot is running with Auto-OTP Delivery System...")
     bot.infinity_polling(skip_pending=True)
