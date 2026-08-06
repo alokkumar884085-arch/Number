@@ -12,7 +12,7 @@ from flask import Flask
 # ==========================================
 # CONFIGURATION
 # ==========================================
-BOT_TOKEN = "8856008829:AAHgne9V0zbxiSb67FUKNKIQM1x89_Lk1QY"
+BOT_TOKEN = "8856008829:AAEp3e_Fcj3HLehzSB_u6PgCspYtCB7vEvk"
 PORT = int(os.environ.get("PORT", 8080))
 
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
