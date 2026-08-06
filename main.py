@@ -12,7 +12,7 @@ from flask import Flask
 # ==========================================
 # CONFIGURATION
 # ==========================================
-BOT_TOKEN = "8960093466:AAHll15soneHvcMKrDEiopSTNup9UX0zCuk"
+BOT_TOKEN = "8856008829:AAHgne9V0zbxiSb67FUKNKIQM1x89_Lk1QY"
 OWNER_ID = 8785590284
 
 API1_URL = "http://147.135.212.197/crapi/st/viewstats"
